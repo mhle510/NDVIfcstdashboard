@@ -87,6 +87,17 @@ for X in range(-18 * n, 52 * n):
                           mu=[round(v, 3) for v in mu], sd=[round(v, 3) for v in sd],
                           p05=[round(a - 1.645 * b, 3) for a, b in zip(mu, sd)], p95=[round(a + 1.645 * b, 3) for a, b in zip(mu, sd)],
                           o=[round(v, 2) for v in o], f=f, cal={c: cal for c in CROPS[z]}))
+# synthetic "HarvestStat" units: 3 x 3 degree boxes over the cropland, named by position
+units = {}
+for c in cells:
+    i, j = int((c["lon"] + 18) // 3), int((c["lat"] + 35) // 3)
+    c["u1"], c["u2"] = f"Region {i}-{j}", f"District {i}-{j}"
+    units[(i, j)] = c["c"]
+UNITS = []
+for (i, j), ctry in units.items():
+    x0, y0 = -18 + 3 * i, -35 + 3 * j
+    UNITS.append(dict(a0=ctry, a1=f"Region {i}-{j}", a2=f"District {i}-{j}", lx=x0 + 1.5, ly=y0 + 1.5,
+                      x=[x0, x0 + 3, x0 + 3, x0, x0, None], y=[y0, y0, y0 + 3, y0 + 3, y0, None]))
 ox, oy = [], []
 for P in LANDS:
     for a, b in P + [P[0]]: ox.append(a); oy.append(b)
@@ -101,5 +112,5 @@ models = [dict(id="smap", label="SMAP–FLDAS*", desc="NDVI + SMAP SM + FLDAS P,
 for mm in models: mm["n"] = f"{sum(1 for c in cells if mm['id'] in c['f']):,}"
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
 json.dump(dict(sample=True, issue="2026-09-01", ic_month="2026-08", months=months, obs_months=months[:3], lead_months=months[3:6],
-               models=models, cells=cells, outline=dict(x=ox, y=oy)), open(OUT, "w"), ensure_ascii=False)
+               models=models, cells=cells, outline=dict(x=ox, y=oy), units=UNITS), open(OUT, "w"), ensure_ascii=False)
 print(len(cells), "synthetic grid cells ->", OUT)

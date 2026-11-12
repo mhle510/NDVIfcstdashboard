@@ -17,12 +17,17 @@
 #   cell: lon, lat, c (country), ai (aridity class), cr (crops), mu[8], sd[8], p05[8], p95[8],
 #         o[3] (observed SA), f{model id: [3] SA}, cal{crop: "8 letters"}
 #   a model without a forecast for a grid cell is absent from its f
+#         u1, u2 (HarvestStat admin 1 and admin 2 unit of the grid cell centre; c = HarvestStat ADMIN0 when found)
 #   outline{x, y}: country outlines for the map (maps package, full domain), polygons separated by null
+#   units[]: HarvestStat units (simplified by --simplify degrees): a0, a1, a2 names, label point lx, ly, rings x, y
+#            separated by null
 #
-# NEEDS  ../5_paper/utils_paper.R (same loaders and SA as Figure 4), 08c forecast of the issue, packages jsonlite, maps
+# NEEDS  ../5_paper/utils_paper.R (same loaders and SA as Figure 4), 08c forecast of the issue, packages jsonlite, maps, sf
+#        HarvestStat boundaries (F_UNITS, as Figure 4); without them the units are left out
 # RUN    cd src/ndvi_dashboard
 #        Rscript export_dashboard.R --issue=2026-10-01
 #        Rscript export_dashboard.R --issue=2026-10-01 --box=22,55,-12,23        (lon1,lon2,lat1,lat2: small test file)
+#        --simplify=0.01   tolerance (degrees) of the HarvestStat boundaries (larger = smaller file)
 # =============================================================================
 
 .sd <- (function() { a <- commandArgs(FALSE); f <- sub("^--file=", "", a[grep("^--file=", a)])
@@ -48,6 +53,8 @@ CROP_FULL <- c(mill = "millet", pmil = "pearl millet", smil = "small millet", so
                sesa = "sesame", cott = "cotton", bean = "bean", cowp = "cowpea", chic = "chickpea", soyb = "soybean",
                ocer = "other cereals", pota = "potato", swpo = "sweet potato", yams = "yams", sugc = "sugarcane")
 DIR_OUT <- file.path(PATH_ROOT, "dashboard_data")
+F_UNITS <- file.path(PATH_ROOT, "data", "raw", "spatial_data", "harveststat", "hvstat_africa_boundary_1.1_paper_experiment.shp")
+SIMP    <- as.numeric(ga("simplify", "0.01"))                             # degrees
 # ---------------------
 for (p in c("jsonlite", "maps")) if (!requireNamespace(p, quietly = TRUE)) stop("needs the R package ", p)
 dir.create(DIR_OUT, showWarnings = FALSE, recursive = TRUE)
@@ -63,6 +70,42 @@ G <- load_grids() %>% filter(lon >= BOX[1], lon <= BOX[2], lat >= BOX[3], lat <=
 ctry <- maps::map.where("world", G$lon, G$lat); G$country <- ifelse(is.na(ctry), "", sub(":.*$", "", ctry))
 G$crops <- vapply(strsplit(G$crops, ",\\s*"), function(v) paste(unique(crop_name_of(v)), collapse = ", "), "")
 cat("Grid cells:", nrow(G), "\n")
+
+# ---- HarvestStat units: unit of each grid cell, simplified boundaries and label points ----
+G$u1 <- ""; G$u2 <- ""; UNITS <- list()
+if (file.exists(F_UNITS)) {
+  suppressPackageStartupMessages(library(sf)); sf_use_s2(FALSE)
+  U <- st_read(F_UNITS, quiet = TRUE); if (is.na(st_crs(U))) st_crs(U) <- 4326
+  U <- st_make_valid(st_transform(U, 4326))
+  cat("HarvestStat units:", nrow(U), "| columns:", paste(setdiff(names(U), attr(U, "sf_column")), collapse = ", "), "\n")
+  colv <- function(cands) { h <- cands[cands %in% names(U)]
+    v <- if (length(h)) as.character(U[[h[1]]]) else rep("", nrow(U)); ifelse(is.na(v), "", v) }
+  U$a0 <- colv(c("ADMIN0", "admin0", "COUNTRY", "country", "NAME_0"))
+  U$a1 <- colv(c("ADMIN1", "admin1", "NAME_1"))
+  U$a2 <- colv(c("ADMIN2", "admin2", "NAME_2"))
+  bb <- st_as_sfc(st_bbox(c(xmin = max(BOX[1], -20), xmax = min(BOX[2], 60), ymin = max(BOX[3], -40), ymax = min(BOX[4], 40)), crs = 4326))
+  U <- U[lengths(st_intersects(U, bb)) > 0, ]
+  # unit of each grid cell centre
+  P  <- st_as_sf(G[, c("grid", "lon", "lat")], coords = c("lon", "lat"), crs = 4326, remove = FALSE)
+  J  <- suppressMessages(st_join(P, U[, c("a0", "a1", "a2")], join = st_intersects, left = TRUE))
+  J  <- J[!duplicated(J$grid), ]; m <- match(G$grid, J$grid)
+  G$u1 <- ifelse(is.na(J$a1[m]), "", J$a1[m]); G$u2 <- ifelse(is.na(J$a2[m]), "", J$a2[m])
+  G$country <- ifelse(!is.na(J$a0[m]) & nzchar(J$a0[m]), J$a0[m], G$country)
+  cat("Grid cells inside a HarvestStat unit:", sum(nzchar(G$u1) | nzchar(G$u2)), "of", nrow(G), "\n")
+  # simplified boundaries (rings separated by NA -> null) and one label point per unit
+  Us <- suppressWarnings(st_simplify(U, dTolerance = SIMP, preserveTopology = TRUE)); Us <- Us[!st_is_empty(Us), ]
+  UNITS <- Filter(Negate(is.null), lapply(seq_len(nrow(Us)), function(i) tryCatch({
+    g  <- st_geometry(Us)[[i]]
+    if (inherits(g, "GEOMETRYCOLLECTION")) g <- st_union(st_collection_extract(st_sfc(g, crs = 4326), "POLYGON"))[[1]]
+    co <- st_coordinates(g); key <- paste(co[, "L1"], if ("L2" %in% colnames(co)) co[, "L2"] else 1)
+    rg <- split(seq_len(nrow(co)), factor(key, levels = unique(key)))
+    lp <- suppressWarnings(st_coordinates(st_point_on_surface(st_sfc(g, crs = 4326))))
+    list(a0 = Us$a0[i], a1 = Us$a1[i], a2 = Us$a2[i], lx = round(lp[1, 1], 3), ly = round(lp[1, 2], 3),
+         x = unlist(lapply(rg, function(r) c(round(co[r, "X"], 3), NA)), use.names = FALSE),
+         y = unlist(lapply(rg, function(r) c(round(co[r, "Y"], 3), NA)), use.names = FALSE))
+  }, error = function(e) NULL)))
+  cat("HarvestStat units written:", length(UNITS), sprintf("(simplified to %g deg)\n", SIMP))
+} else message("No HarvestStat boundaries at ", F_UNITS, " (units left out of the dashboard)")
 
 # ---- normal: mean and SD (SA definition) + 5th-95th percentiles of 2003-2025 (as Figure 4c) ----
 clim <- load_ndvi_clim() %>% filter(grid %in% G$grid)
@@ -112,7 +155,7 @@ cells <- lapply(seq_len(nrow(G)), function(i) { g <- G$grid[i]
   if (!is.null(f)) for (m in unique(f$id)) { v <- rep(NA_real_, 3); x <- f[f$id == m, ]; v[x$lead + 1] <- x$sa; fl[[m]] <- r2(v) }
   si <- PS$sa_ic[match(g, PS$grid)]; if (!is.na(si)) fl$pers <- r2(rep(si, 3))
   fl$clim <- c(0, 0, 0)
-  list(lon = G$lon[i], lat = G$lat[i], c = G$country[i], ai = tolower(as.character(G$ai_class[i])), cr = G$crops[i],
+  list(lon = G$lon[i], lat = G$lat[i], c = G$country[i], u1 = G$u1[i], u2 = G$u2[i], ai = tolower(as.character(G$ai_class[i])), cr = G$crops[i],
        mu = r3(n$clim_value), sd = r3(n$clim_sd), p05 = r3(n$p05), p95 = r3(n$p95), o = r2(ov), f = fl,
        cal = if (is.null(cl)) setNames(list(), character(0)) else as.list(setNames(cl$cal, cl$crop)))
 })
@@ -124,11 +167,11 @@ mods <- rbind(MODELS[, c("id", "label", "desc")],
                                   "Normal NDVI for the month (2003–2025 average)")))
 mods$n <- vapply(mods$id, n_of, "")
 # ---- country outlines for the map (maps package), polygons separated by NA -> null ----
-OL <- maps::map("world", plot = FALSE, xlim = c(-20, 60), ylim = c(-40, 40))
+OL <- maps::map("world", plot = FALSE, fill = TRUE, xlim = c(-20, 60), ylim = c(-40, 40))
 OUTLINE <- list(x = round(OL$x, 2), y = round(OL$y, 2))
 OUT <- list(issue = ISSUE, ic_month = format(as.Date(ic), "%Y-%m"),
             months = format(WIN, "%Y-%m"), obs_months = format(obs_d, "%Y-%m"), lead_months = format(tgt_d, "%Y-%m"),
-            models = mods, cells = cells, outline = OUTLINE)
+            models = mods, cells = cells, outline = OUTLINE, units = UNITS)
 F_OUT <- file.path(DIR_OUT, sprintf("ndvi_dashboard_%s%s.json", ISSUE, if (any(grepl("^--box=", ARGS))) "_box" else ""))
 jsonlite::write_json(OUT, F_OUT, auto_unbox = TRUE, digits = NA, na = "null", null = "null")
 

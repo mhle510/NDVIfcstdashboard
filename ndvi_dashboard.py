@@ -54,11 +54,12 @@ def compact(cells, model_ids):
     """Columnar arrays: smaller than one dict per grid cell, quick to read in the page."""
     def r(v, k):
         return None if v is None else round(float(v), k)
-    out = {"lon": [], "lat": [], "c": [], "ai": [], "cr": [], "mu": [], "sd": [], "p05": [], "p95": [],
+    out = {"lon": [], "lat": [], "c": [], "u1": [], "u2": [], "ai": [], "cr": [], "mu": [], "sd": [], "p05": [], "p95": [],
            "o": [], "cal": [], "f": {m: [] for m in model_ids}}
     for c in cells:
         out["lon"].append(c["lon"]); out["lat"].append(c["lat"])
-        out["c"].append(c.get("c") or ""); out["ai"].append(c.get("ai") or ""); out["cr"].append(c.get("cr") or "")
+        out["c"].append(c.get("c") or ""); out["u1"].append(c.get("u1") or ""); out["u2"].append(c.get("u2") or "")
+        out["ai"].append(c.get("ai") or ""); out["cr"].append(c.get("cr") or "")
         for k in ("mu", "sd", "p05", "p95"):
             v = c.get(k) or [None] * 8
             out[k].append([r(x, 3) for x in v])
@@ -69,6 +70,19 @@ def compact(cells, model_ids):
         for m in model_ids:
             v = f.get(m)
             out["f"][m].append(None if v is None else [r(x, 2) for x in v])
+    return out
+
+
+def compact_units(units):
+    """HarvestStat units: names and label points, all rings in one x/y list separated by None."""
+    out = {"a0": [], "a1": [], "a2": [], "lx": [], "ly": [], "x": [], "y": []}
+    for u in units or []:
+        for k in ("a0", "a1", "a2"):
+            out[k].append(u.get(k) or "")
+        out["lx"].append(u.get("lx")); out["ly"].append(u.get("ly"))
+        xs, ys = u.get("x") or [], u.get("y") or []
+        if not isinstance(xs, list): xs, ys = [xs], [ys]
+        out["x"].extend(xs + [None]); out["y"].extend(ys + [None])
     return out
 
 
@@ -108,6 +122,7 @@ def main():
         "res": res,
         "sample": bool(D.get("sample")),
         "outline": D.get("outline") or {"x": [], "y": []},
+        "units": compact_units(D.get("units")),
         "cells": compact(cells, ids),
     }
     blob = base64.b64encode(gzip.compress(json.dumps(payload, separators=(",", ":")).encode("utf-8"), 9)).decode("ascii")
@@ -121,6 +136,9 @@ def main():
     print(f"Issue {payload['issued']} | IC {payload['ic']} | outlook {payload['outlook']}")
     print(f"Grid cells: {len(cells)} (resolution {res} deg) | with a forecast: " +
           ", ".join(f"{m} {n}" for m, n in n_f.items()))
+    print(f"Country outline points: {len(payload['outline']['x'])} | HarvestStat units: {len(payload['units']['a0'])}")
+    if not payload["outline"]["x"]:
+        print("WARNING: no country outlines in the data file -> re-run export_dashboard.R (current version)")
     print(f"-> {out} ({os.path.getsize(out) / 1e6:.1f} MB)")
 
 
@@ -143,6 +161,8 @@ header .sub { font-size: 14px; font-weight: 500; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
 .controls { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 18px; }
 .controls label { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink2); }
+.controls label.chk { flex-direction: row; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink); min-height: 40px; cursor: pointer; }
+.controls label.chk input { width: 18px; height: 18px; }
 .controls select { font: inherit; font-size: 14px; min-height: 40px; padding: 4px 10px; border: 1px solid #cfcdc5;
   border-radius: 7px; background: #fff; color: var(--ink); cursor: pointer; }
 main { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr)); gap: 14px; align-items: start; }
@@ -195,6 +215,7 @@ footer { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line)
   <label>Region <select id="region"></select></label>
   <label>Month <select id="lead"></select></label>
   <label>Forecast model <select id="model"></select></label>
+  <label class="chk"><input type="checkbox" id="units" checked> HarvestStat units</label>
 </div>
 <main>
 <section class="card">
@@ -213,12 +234,13 @@ footer { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line)
     <div class="legend" id="legend"></div>
     <div class="ends"><span>Less green than normal</span><span>Greener than normal</span></div>
   </div>
-  <p class="note">Click a cropland grid cell to see its NDVI outlook · scroll to zoom, drag to pan · empty cropland = no forecast from this model for that grid cell · the selection is kept in the page address.</p>
+  <p class="note">Click a cropland grid cell to see its NDVI outlook · scroll to zoom (HarvestStat unit names show when zoomed in), drag to pan · empty cropland = no forecast from this model for that grid cell · the selection is kept in the page address.</p>
 </section>
 <section class="card" id="panel">
   <div style="display:flex;flex-direction:column;gap:6px">
     <span class="small">Grid cell</span>
     <span class="cell-title" id="ctitle"></span>
+    <span class="small" id="cunit"></span>
     <div class="chips"><span class="chip" id="ccrops"></span><span class="chip" id="cclim"></span><span class="chip model" id="cmodel"></span></div>
   </div>
   <div class="nofc" id="nofc" hidden></div>
@@ -319,6 +341,21 @@ $('region').value = S.region; $('lead').value = S.lead; $('model').value = S.mod
 
 /* ---------- map ---------- */
 const cv = $('map'), ctx = cv.getContext('2d');
+function pathOf(xs, ys, close) {           // lon/lat path, drawn with a lon/lat -> pixel transform
+  const p = new Path2D(); let pen = false;
+  for (let k = 0; k < xs.length; k++) {
+    if (xs[k] === null || ys[k] === null) { if (pen && close) p.closePath(); pen = false; continue; }
+    if (pen) p.lineTo(xs[k], -ys[k]); else { p.moveTo(xs[k], -ys[k]); pen = true; } }
+  return p;
+}
+const U = P.units, NU = U.a0.length;
+const OUTLINE = pathOf(P.outline.x, P.outline.y, true), UNITP = pathOf(U.x, U.y, true);
+const HAS_OUTLINE = P.outline.x.length > 0;
+const CTRY = (() => { const acc = new Map();      // country label = mean of its unit label points
+  for (let k = 0; k < NU; k++) { if (!U.a0[k] || U.lx[k] === null) continue;
+    const a = acc.get(U.a0[k]) || [0, 0, 0]; a[0] += U.lx[k]; a[1] += U.ly[k]; a[2]++; acc.set(U.a0[k], a); }
+  return [...acc].map(([n, a]) => ({ n, x: a[0] / a[2], y: a[1] / a[2] })); })();
+let showUnits = true;
 let view = null;                      // [lon1, lon2, lat1, lat2] shown
 function regionBox() { return P.regions.find(r => r.id === S.region).b.slice(); }
 function fitView(b) { view = b; resize(); }
@@ -340,13 +377,11 @@ function proj() {
 }
 function draw() {
   const { sx, sy, X, Y } = proj(), d = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.fillStyle = '#eef3f7'; ctx.fillRect(0, 0, cv.width, cv.height);
-  const ox = P.outline.x, oy = P.outline.y;
-  const outline = () => { ctx.beginPath(); let pen = false;
-    for (let k = 0; k < ox.length; k++) {
-      if (ox[k] === null || oy[k] === null) { pen = false; continue; }
-      const x = X(ox[k]), y = Y(oy[k]); if (pen) ctx.lineTo(x, y); else { ctx.moveTo(x, y); pen = true; } } };
-  outline(); ctx.fillStyle = '#f4f3ef'; ctx.fill();
+  const geo = () => ctx.setTransform(sx, 0, 0, sy, -view[0] * sx, view[3] * sy);
+  const px1 = () => ctx.setTransform(1, 0, 0, 1, 0, 0);
+  geo(); ctx.fillStyle = '#f4f3ef'; ctx.fill(HAS_OUTLINE ? OUTLINE : UNITP); px1();
   const reg = P.regions.find(r => r.id === S.region);
   if (reg.ok) {
     const f = C.f[S.model], L = S.lead, w = RES * sx, h = RES * sy, gap = w > 6 ? 0.6 * d : 0;
@@ -358,7 +393,24 @@ function draw() {
       ctx.fillRect(X(lo - RES / 2) + gap / 2, Y(la + RES / 2) + gap / 2, w - gap, h - gap);
     }
   }
-  outline(); ctx.strokeStyle = '#8a887f'; ctx.lineWidth = 0.8 * d; ctx.stroke();
+  const width = view[1] - view[0];
+  geo();
+  if (showUnits && NU) { ctx.strokeStyle = 'rgba(90,89,84,0.55)'; ctx.lineWidth = (width < 15 ? 0.7 : 0.4) * d / sx; ctx.stroke(UNITP); }
+  if (HAS_OUTLINE) { ctx.strokeStyle = '#3d3c38'; ctx.lineWidth = 0.9 * d / sx; ctx.stroke(OUTLINE); }
+  px1();
+  // labels: HarvestStat unit names when zoomed in, country names otherwise
+  const taken = [], put = (txt, x, y, font, col) => {
+    ctx.font = font; const w = ctx.measureText(txt).width, h = 12 * d, r = [x - w / 2 - 2 * d, y - h / 2, w + 4 * d, h];
+    if (x < 0 || y < 0 || x > cv.width || y > cv.height) return;
+    if (taken.some(t => r[0] < t[0] + t[2] && t[0] < r[0] + r[2] && r[1] < t[1] + t[3] && t[1] < r[1] + r[3])) return;
+    taken.push(r); ctx.lineWidth = 3 * d; ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.strokeText(txt, x, y); ctx.fillStyle = col; ctx.fillText(txt, x, y); };
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  if (showUnits && NU && width <= 14) {
+    for (let k = 0; k < NU; k++) { const n = U.a2[k] || U.a1[k]; if (!n || U.lx[k] === null) continue;
+      put(n, X(U.lx[k]), Y(U.ly[k]), `${11 * d}px system-ui, sans-serif`, '#2b2a27'); }
+  } else if (CTRY.length) {
+    for (const c of CTRY) put(c.n.toUpperCase(), X(c.x), Y(c.y), `600 ${10 * d}px system-ui, sans-serif`, '#55544f');
+  }
   if (reg.ok && S.cell !== null) {
     const i = S.cell, s = Math.max(RES * sx, 7 * d);
     ctx.strokeStyle = '#141413'; ctx.lineWidth = 2.5 * d;
@@ -390,7 +442,7 @@ cv.addEventListener('pointermove', ev => {
   const [lo, la] = lonlatAt(ev), i = cellAt(lo, la), tip = $('tip');
   if (i === undefined || !P.regions.find(r => r.id === S.region).ok) { tip.style.display = 'none'; return; }
   const f = C.f[S.model][i], v = f ? f[S.lead] : null, r = $('mapbox').getBoundingClientRect();
-  tip.textContent = `${C.c[i] || 'Grid cell'} · ${ew(i)} · ` + (v === null || v === undefined ? 'no forecast' : `anomaly ${sgn(v)}`);
+  tip.textContent = [C.c[i] || 'Grid cell', C.u1[i], C.u2[i]].filter(Boolean).join(' · ') + ` · ${ew(i)} · ` + (v === null || v === undefined ? 'no forecast' : `anomaly ${sgn(v)}`);
   tip.style.left = (ev.clientX - r.left) + 'px'; tip.style.top = (ev.clientY - r.top) + 'px'; tip.style.display = 'block';
 });
 cv.addEventListener('pointerleave', () => { $('tip').style.display = 'none'; });
@@ -442,7 +494,8 @@ function chart(i, f) {
 }
 function panel() {
   const i = S.cell, m = P.models.find(x => x.id === S.model), f = C.f[S.model][i];
-  $('ctitle').textContent = `${C.c[i] || 'Unknown country'} · ${ew(i)}`;
+  $('ctitle').textContent = [C.c[i] || 'Unknown country', C.u1[i], C.u2[i]].filter(Boolean).join(' · ');
+  $('cunit').textContent = ew(i);
   $('ccrops').textContent = 'Crops: ' + (C.cr[i] || 'not listed');
   $('cclim').textContent = 'Climate: ' + (C.ai[i] || 'not listed');
   $('cmodel').textContent = m.label;
@@ -474,6 +527,8 @@ function update() {
 $('region').onchange = e => { S.region = e.target.value; fitView(regionBox()); update(); };
 $('lead').onchange = e => { S.lead = +e.target.value; update(); };
 $('model').onchange = e => { S.model = e.target.value; update(); };
+$('units').onchange = e => { showUnits = e.target.checked; draw(); };
+if (!NU) $('units').parentNode.hidden = true;
 fitView(regionBox()); update();
 })();
 </script>

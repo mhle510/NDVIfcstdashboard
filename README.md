@@ -6,7 +6,7 @@ forecasts of the DAPI pipeline (08c), as Figure 4 of the paper.
 
 * **Left: map.** Standardized anomaly (SA) of NDVI of every cropland grid cell for the selected region,
   month and forecast model. Click a grid cell to select it, scroll to zoom, drag to pan.
-* **Right: grid cell.** Country, lon/lat, crops and climate; SA category, NDVI and SA for each month;
+* **Right: grid cell.** Country, HarvestStat admin 1 and admin 2 unit, lon/lat, crops and climate; SA category, NDVI and SA for each month;
   NDVI over 8 months (observed to the initial condition, forecast, normal and normal range);
   crop calendar (HarvestStats v1.0).
 * **Lists:** Region (full domain, East, West, Southern Africa; Middle East and North Africa and Lebanon and
@@ -47,7 +47,7 @@ python ndvi_dashboard.py --data sample/ndvi_dashboard_2026-09-01_sample.json --o
 
 | File | Role |
 |---|---|
-| `export_dashboard.R` | one JSON per issue date: every cropland grid cell with forecasts (random forest models only), persistence, observed SA, normal (mean, SD, 5–95th percentile 2003–2025), crop calendar, and country outlines (`maps`) |
+| `export_dashboard.R` | one JSON per issue date: every cropland grid cell with forecasts (random forest models only), persistence, observed SA, normal (mean, SD, 5–95th percentile 2003–2025), crop calendar and HarvestStat unit; country outlines (`maps`) and simplified HarvestStat boundaries (`sf`, `--simplify=0.01` degrees) |
 | `ndvi_dashboard.py` | JSON → self-contained HTML (Python standard library only) |
 | `tools/make_sample_data.py` | synthetic JSON with the same layout, for testing |
 | `sample/` | synthetic example data and page |
@@ -55,8 +55,9 @@ python ndvi_dashboard.py --data sample/ndvi_dashboard_2026-09-01_sample.json --o
 ## Data file layout (`ndvi_dashboard_<issue>.json`)
 
 `issue`, `ic_month`, `months[8]`, `obs_months[3]`, `lead_months[3]`, `models[{id, label, desc, n}]`,
-`outline{x, y}` (polygons separated by `null`) and `cells[]` with
-`lon, lat, c` (country), `ai` (aridity class), `cr` (crops), `mu[8], sd[8], p05[8], p95[8]` (normal),
+`outline{x, y}` (polygons separated by `null`), `units[{a0, a1, a2, lx, ly, x, y}]` (HarvestStat boundaries,
+rings separated by `null`, label point `lx, ly`) and `cells[]` with
+`lon, lat, c` (country), `u1, u2` (HarvestStat admin 1, admin 2), `ai` (aridity class), `cr` (crops), `mu[8], sd[8], p05[8], p95[8]` (normal),
 `o[3]` (observed SA), `f{model id: [3] SA}` (a model without a forecast for the grid cell is absent),
 `cal{crop: 8 letters}` (P planting–vegetative, G vegetative–harvest, H harvest–end of season, `.` none).
 The `clim` entry of `f` (SA = 0) is not shown in the page; the normal is drawn in the chart instead.
