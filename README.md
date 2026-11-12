@@ -1,8 +1,7 @@
 # NDVIfcstdashboard
 
 An interactive page that shows the cropland NDVI outlook for the next three months, for **one issue date**,
-over Sub-Saharan Africa (Middle East and North Africa coming soon). Built from the random forest NDVI
-forecasts of the DAPI pipeline (08c), as Figure 4 of the paper.
+over Sub-Saharan Africa (Middle East and North Africa coming soon). 
 
 * **Left: map.** Standardized anomaly (SA) of NDVI of every cropland grid cell for the selected region,
   month and forecast model. Click a grid cell to select it, scroll to zoom, drag to pan.
