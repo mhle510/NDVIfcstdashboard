@@ -250,7 +250,7 @@ footer { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line)
       <span style="font-weight:600;color:var(--ink)" id="tstitle"></span>
       <span><span class="ln" style="border-top:2.4px solid #141413"></span><span id="obslab"></span></span>
       <span><span class="ln" style="border-top:2.4px solid #2171b5"></span><span id="fclab"></span></span>
-      <span><span class="ln" style="border-top:2px dotted #6b6a64"></span>Normal (2003–2025 average)</span>
+      <span><span class="ln" style="border-top:2px dotted #6b6a64"></span>Climatology (2003–2025)</span>
       <span><span class="ln" style="height:9px;background:#e3e1da"></span>Normal range (5–95th percentile)</span>
     </div>
     <div id="ts"></div>
