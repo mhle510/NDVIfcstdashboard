@@ -1,0 +1,6 @@
+dashboard_data/
+ndvi_outlook_*.html
+!sample/ndvi_outlook_*_sample.html
+__pycache__/
+.Rhistory
+sample/*.json
