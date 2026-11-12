@@ -106,6 +106,7 @@ def main():
         "default_model": DEFAULT_MODEL if DEFAULT_MODEL in ids else ids[0],
         "regions": [dict(id=r[0], label=r[1], b=[r[2], r[3], r[4], r[5]], ok=r[6]) for r in REGIONS],
         "res": res,
+        "sample": bool(D.get("sample")),
         "outline": D.get("outline") or {"x": [], "y": []},
         "cells": compact(cells, ids),
     }
@@ -256,6 +257,8 @@ async function gunzip(b64) {
   return await new Response(ds).text();
 }
 const P = JSON.parse(await gunzip($('payload').textContent));
+if (P.sample) { $('banner').hidden = false; $('banner').style.background = '#fdf1cf';
+  $('banner').innerHTML = '<b>Synthetic sample.</b> Made-up values and hand-drawn outlines for testing the page only. Build the real page from the data file written by export_dashboard.R.'; }
 const C = P.cells, N = C.lon.length, RES = P.res;
 
 /* ---------- colours and words ---------- */

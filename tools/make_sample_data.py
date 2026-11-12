@@ -100,6 +100,6 @@ models = [dict(id="smap", label="SMAP–FLDAS*", desc="NDVI + SMAP SM + FLDAS P,
           dict(id="clim", label="Climatology", desc="Normal NDVI for the month (2003–2025 average)")]
 for mm in models: mm["n"] = f"{sum(1 for c in cells if mm['id'] in c['f']):,}"
 os.makedirs(os.path.dirname(OUT) or ".", exist_ok=True)
-json.dump(dict(issue="2026-09-01", ic_month="2026-08", months=months, obs_months=months[:3], lead_months=months[3:6],
+json.dump(dict(sample=True, issue="2026-09-01", ic_month="2026-08", months=months, obs_months=months[:3], lead_months=months[3:6],
                models=models, cells=cells, outline=dict(x=ox, y=oy)), open(OUT, "w"), ensure_ascii=False)
 print(len(cells), "synthetic grid cells ->", OUT)
