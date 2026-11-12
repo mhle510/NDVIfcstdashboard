@@ -257,7 +257,7 @@ footer { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line)
   </div>
   <div style="display:flex;flex-direction:column;gap:6px">
     <span style="font-size:12px;font-weight:600">Crop calendar (HarvestStats v1.0)</span>
-    <div class="cal" id="cal"></div>
+    <div id="cal"></div>
     <span class="note" style="font-size:11px">Light = planting · full = growing · pale = harvest to end of season</span>
   </div>
 </section>
@@ -455,9 +455,11 @@ cv.addEventListener('pointerup', ev => {
 window.addEventListener('resize', () => resize());
 
 /* ---------- grid cell panel ---------- */
+// chart and crop calendar share one month axis: month k is the cell [ML + k*STEP, ML + (k+1)*STEP], points at its centre
+const AW = 760, AML = 92, AMR = 12, STEP = (AW - AML - AMR) / 8, XC = k => AML + (k + 0.5) * STEP;
 function chart(i, f) {
-  const W = 760, H = 300, ML = 46, MR = 16, MT = 14, MB = 36;
-  const X = k => ML + k * (W - ML - MR) / 7;
+  const W = AW, H = 300, ML = AML, MR = AMR, MT = 14, MB = 36;
+  const X = XC;
   const mu = C.mu[i], sd = C.sd[i];
   const lo = mu.map((m, k) => C.p05[i][k] ?? (m === null ? null : m - 1.645 * sd[k]));
   const hi = mu.map((m, k) => C.p95[i][k] ?? (m === null ? null : m + 1.645 * sd[k]));
@@ -485,8 +487,10 @@ function chart(i, f) {
   const yr = P.months.map((m, k) => (k === 0 || m.slice(0, 4) !== P.months[k - 1].slice(0, 4)) ?
     `<text x="${X(k)}" y="${H - MB + 30}" font-size="10" text-anchor="middle" fill="#6b6a64">${m.slice(0, 4)}</text>` : '').join('');
   return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto" role="img" aria-label="NDVI of this grid cell: observed, forecast and normal">
-    ${g}<rect x="${X(2.5)}" y="${MT}" width="${X(5.5) - X(2.5)}" height="${H - MT - MB}" fill="#2171b5" fill-opacity="0.06"/>
-    <text x="${X(4)}" y="${MT + 14}" font-size="11" text-anchor="middle" fill="#1d5fa8" font-weight="600">Forecast</text>
+    ${g}<rect x="${X(2)}" y="${MT}" width="${X(5) - X(2)}" height="${H - MT - MB}" fill="#2171b5" fill-opacity="0.07"/>
+    <text x="${(X(2) + X(5)) / 2}" y="${MT + 14}" font-size="11" text-anchor="middle" fill="#1d5fa8" font-weight="600">Forecast</text>
+    <line x1="${X(2)}" x2="${X(2)}" y1="${MT}" y2="${H - MB}" stroke="#52514e" stroke-width="1.2" stroke-dasharray="4 3"/>
+    <text x="${X(2)}" y="${H - MB + 30}" font-size="10" text-anchor="middle" fill="#52514e">(IC)</text>
     ${band}<path d="${line(ks, mu)}" fill="none" stroke="#6b6a64" stroke-width="1.4" stroke-dasharray="2 3"/>
     <path d="${line([0, 1, 2], obs)}" fill="none" stroke="#141413" stroke-width="2.4"/>${dots([0, 1, 2], obs, '#141413', 3.2)}
     ${f ? `<path d="${line([2, 3, 4, 5], [obs[2]].concat(fv))}" fill="none" stroke="#2171b5" stroke-width="2.4"/>${dots([3, 4, 5], fv, '#2171b5', 4)}` : ''}
@@ -512,11 +516,14 @@ function panel() {
   }).join('') : '';
   $('ts').innerHTML = chart(i, f);
   const cal = C.cal[i], crops = Object.keys(cal);
-  $('cal').innerHTML = '<span></span>' + P.months.map(mm => `<span class="mh">${mon(mm, { month: 'short' })}</span>`).join('') +
-    (crops.length ? crops.map(cr => { const col = CROPCOL[cr] || '#808080';
-      return `<span style="font-weight:600;color:${col}">${cr.charAt(0).toUpperCase() + cr.slice(1)}</span>` +
-        cal[cr].split('').map(ch => `<span class="bar" style="background:${ch === 'P' ? tint(col, 0.45) : ch === 'G' ? col : ch === 'H' ? tint(col, 0.25) : 'transparent'}"></span>`).join(''); }).join('')
-      : '<span class="note" style="grid-column:1 / -1">No crop calendar for this grid cell.</span>');
+  if (!crops.length) { $('cal').innerHTML = '<p class="note">No crop calendar for this grid cell.</p>'; return; }
+  const RH = 18, TOP = 18, HC = TOP + crops.length * (RH + 4);
+  const head = P.months.map((mm, k) => `<text x="${XC(k)}" y="12" font-size="11" text-anchor="middle" fill="#52514e">${mon(mm, { month: 'short' })}</text>`).join('');
+  const rows = crops.map((cr, r) => { const col = CROPCOL[cr] || '#808080', y = TOP + r * (RH + 4);
+    return `<text x="${AML - 8}" y="${y + RH / 2 + 4}" font-size="11.5" font-weight="600" text-anchor="end" fill="${col}">${cr.charAt(0).toUpperCase() + cr.slice(1)}</text>` +
+      cal[cr].split('').map((ch, k) => ch === '.' ? '' : `<rect x="${AML + k * STEP + 1}" y="${y}" width="${STEP - 2}" height="${RH}" fill="${ch === 'P' ? tint(col, 0.45) : ch === 'G' ? col : tint(col, 0.25)}"/>`).join(''); }).join('');
+  $('cal').innerHTML = `<svg viewBox="0 0 ${AW} ${HC}" style="display:block;width:100%;height:auto" role="img" aria-label="Crop calendar of this grid cell">
+    ${head}${rows}<line x1="${XC(2)}" x2="${XC(2)}" y1="${TOP - 2}" y2="${HC}" stroke="#52514e" stroke-width="1.2" stroke-dasharray="4 3"/></svg>`;
 }
 function update() {
   const reg = P.regions.find(r => r.id === S.region), m = P.models.find(x => x.id === S.model);
