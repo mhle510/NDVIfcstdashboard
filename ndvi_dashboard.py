@@ -20,7 +20,7 @@ Page
 Usage
 -----
   python ndvi_dashboard.py --data dashboard_data/ndvi_dashboard_2026-09-01.json
-  python ndvi_dashboard.py --data ... --output ndvi_outlook_Sep2026.html --issue-day 4
+  python ndvi_dashboard.py --data ... --output ndvi_outlook_Sep2026.html --issue-day 4 --author "Hung Le"
 
 Needs only the Python standard library.
 """
@@ -92,6 +92,7 @@ def main():
     ap.add_argument("--output", help="output .html (default: ndvi_outlook_<Mon><YYYY>.html next to the data)")
     ap.add_argument("--issue-day", type=int, default=4, help="day of the month shown as the issue date (default 4)")
     ap.add_argument("--title", default="Cropland NDVI outlook")
+    ap.add_argument("--author", default="Hung Le", help="name shown in the page header (empty to hide)")
     a = ap.parse_args()
 
     with open(a.data, encoding="utf-8") as fh:
@@ -110,7 +111,7 @@ def main():
     ic, leads = D["ic_month"], D["lead_months"]
     issue_date = dt.datetime.strptime(issue + "-01", "%Y-%m-%d").replace(day=a.issue_day)
     payload = {
-        "title": a.title,
+        "title": a.title, "author": a.author,
         "issued": f"{issue_date.day} {issue_date.strftime('%B %Y')}",
         "ic": month_name(ic), "ic_short": month_name(ic, "%B"),
         "months": D["months"], "obs_months": D["obs_months"], "lead_months": leads,
@@ -209,6 +210,8 @@ footer { font-size: 12px; color: var(--muted); border-top: 1px solid var(--line)
 <header>
   <h1 id="title"></h1>
   <span class="sub" id="sub"></span>
+  <span style="flex:1 1 auto"></span>
+  <span class="small" id="author"></span>
 </header>
 <div class="banner" id="banner" hidden></div>
 <div class="card controls">
@@ -301,6 +304,7 @@ const ew = i => `${Math.abs(C.lon[i]).toFixed(2)}°${C.lon[i] < 0 ? 'W' : 'E'}, 
 
 /* ---------- static text ---------- */
 $('title').textContent = P.title;
+$('author').textContent = P.author ? 'Prepared by ' + P.author : '';
 $('sub').textContent = `Issued ${P.issued} · initial condition ${P.ic} · outlook ${P.outlook}`;
 $('legend').innerHTML = SAB.map((b, k) => `<div><span class="sw" style="background:${b[2]}"></span><span class="lb">${SAL[k]}</span></div>`).join('');
 $('foot').textContent = 'Anomaly = how far NDVI is from its 2003–2025 normal for that month, in units of its usual year-to-year spread. ' +
